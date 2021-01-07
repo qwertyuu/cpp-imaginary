@@ -1,1 +1,1 @@
-g++ -std=c++17 -g -o bin/imaginary Source.cpp -lncurses
+g++ -std=c++17 -o bin/imaginary Source.cpp includes/*.cpp -lncurses -lgmp

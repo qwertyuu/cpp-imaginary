@@ -1,54 +1,51 @@
 #include "Vector2D.h"
-#include <math.h>
+#include <gmp.h>
 
-Vector2D::Vector2D(double _x, double _y)
+Vector2D::Vector2D(mpf_t &X, mpf_t &Y)
 {
-    x = _x;
-    y = _y;
+    mpf_init(x);
+    mpf_set(x, X);
+
+    mpf_init(y);
+    mpf_set(y, Y);
 }
 
-Vector2D Vector2D::Multiply(double scalar) const
+Vector2D::~Vector2D()
 {
-    return Vector2D(x * scalar, y * scalar);
+    mpf_clear(x);
+    mpf_clear(y);
 }
 
-Vector2D Vector2D::Subtract(Vector2D sub) const
+Vector2D *Vector2D::Multiply(double scalar)
 {
-    return Vector2D(x - sub.x, y - sub.y);
+    mpf_t scalarAsMPF;
+    mpf_init_set_d(scalarAsMPF, scalar);
+    mpf_mul(x, x, scalarAsMPF);
+    mpf_mul(y, y, scalarAsMPF);
+    mpf_clear(scalarAsMPF);
+    return this;
 }
 
-Vector2D Vector2D::Add(Vector2D add) const
+Vector2D *Vector2D::Subtract(Vector2D &sub)
 {
-    return Vector2D(x + add.x, y + add.y);
+    mpf_sub(x, x, sub.x);
+    mpf_sub(y, y, sub.y);
+    return this;
 }
 
-Vector2D Vector2D::ToUnit() const
+Vector2D *Vector2D::Add(Vector2D &add)
 {
-    double velocity = Velocity();
-    return Vector2D(x / velocity, y / velocity);
+    mpf_add(x, x, add.x);
+    mpf_add(y, y, add.y);
+    return this;
 }
 
-Vector2D Vector2D::Inverse() const
+void Vector2D::X(mpf_t &X) const
 {
-    return Vector2D(-x, -y);
+    mpf_set(X, x);
 }
 
-double Vector2D::Velocity() const
+void Vector2D::Y(mpf_t &Y) const
 {
-    return sqrt(x * x + y * y);
-}
-
-double Vector2D::X() const
-{
-    return x;
-}
-
-double Vector2D::Y() const
-{
-    return y;
-}
-
-Vector2D Vector2D::ToVelocity(double v) const
-{
-    return ToUnit().Multiply(v);
+    mpf_set(Y, y);
 }

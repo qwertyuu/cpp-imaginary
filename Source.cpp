@@ -5,20 +5,21 @@
 #include <math.h>
 #include "includes/ImaginaryNumber.h"
 #include "includes/Vector2D.h"
+#include <gmp.h>
 
 using namespace std;
 
-bool isMandlebrotBound(ImaginaryNumber C, double ratio)
+bool isMandlebrotBound(ImaginaryNumber &C, double ratio)
 {
-    ImaginaryNumber z = ImaginaryNumber(0, 0);
-    if (C.SquaredAbsolute() > 4)
+    if (C.SquaredAbsoluteGreaterThan(4))
     {
         return false;
     }
+    ImaginaryNumber z(0.0, 0.0);
     for (int i = 0; i < ratio; i++)
     {
         z = z.Square().Add(C);
-        if (z.SquaredAbsolute() > 4)
+        if (z.SquaredAbsoluteGreaterThan(4))
         {
             return false;
         }
@@ -28,16 +29,22 @@ bool isMandlebrotBound(ImaginaryNumber C, double ratio)
 
 int nScreenWidth;
 int nScreenHeight;
-double defaultMinReal = -2;
-double defaultMaxReal = 1;
+mpf_t defaultMinReal;
+mpf_t defaultMaxReal;
+mpf_t defaultMinImaginary;
+mpf_t defaultMaxImaginary;
+int resolutionStep = 128;
+std::ostream &operator<<(std::ostream &strm, const mpf_t &a)
+{
+    return strm << "(mpf_t: " << mpf_get_d(a) << ")";
+}
 
-double defaultMinImaginary = 1;
-double defaultMaxImaginary = -1;
 ofstream logger;
 
-double interpolateSpan(double min, double span, double progress)
+void interpolateSpan(mpf_t &min, mpf_t &span, mpf_t &progress, mpf_t &result)
 {
-    return min + (progress * span);
+    mpf_mul(result, span, progress);
+    mpf_add(result, result, min);
 }
 
 int main()
@@ -45,28 +52,63 @@ int main()
     logger.open ("log.txt");
     WINDOW *currWin = initscr();
     getmaxyx(currWin, nScreenHeight, nScreenWidth);
+    mpf_t screenWidth;
+    mpf_init_set_d(screenWidth, nScreenWidth);
+    mpf_t screenHeight;
+    mpf_init_set_d(screenHeight, nScreenHeight);
+
+    mpf_init_set_si(defaultMinReal, -2);
+    mpf_init_set_si(defaultMaxReal, 1);
+
+    mpf_init_set_si(defaultMinImaginary, 1);
+    mpf_init_set_si(defaultMaxImaginary, -1);
+
     char *screen = new char[nScreenWidth * nScreenHeight];
-    double minReal = defaultMinReal;
-    double maxReal = defaultMaxReal;
-    unsigned int resolution = 512;
+    mpf_t minReal;
+    mpf_init_set(minReal, defaultMinReal);
+    mpf_t maxReal;
+    mpf_init_set(maxReal, defaultMaxReal);
+    mpf_t minImaginary;
+    mpf_init_set(minImaginary, defaultMinImaginary);
+    mpf_t maxImaginary;
+    mpf_init_set(maxImaginary, defaultMaxImaginary);
 
-    double minImaginary = defaultMinImaginary;
-    double maxImaginary = defaultMaxImaginary;
+    unsigned int resolution = 128;
+    mpf_t realSpan;
+    mpf_t imaginarySpan;
+    mpf_t movement;
 
-    double zoomFactor = 1;
+    mpf_init(movement);
+    mpf_init(realSpan);
+    mpf_init(imaginarySpan);
 
     while (1)
     {
-        double realSpan = maxReal - minReal;
-        double imaginarySpan = maxImaginary - minImaginary;
+        mpf_sub(realSpan, maxReal, minReal);
+        mpf_sub(imaginarySpan, maxImaginary, minImaginary);
     
         for (int y = 0; y < nScreenHeight; y++)
         {
             for (int x = 0; x < nScreenWidth; x++)
             {
+                mpf_t widthProgress;
+                mpf_init_set_si(widthProgress, x);
+                mpf_div(widthProgress, widthProgress, screenWidth);
+
+                mpf_t heightProgress;
+                mpf_init_set_si(heightProgress, y);
+                mpf_div(heightProgress, heightProgress, screenHeight);
+
+                mpf_t realInterpolate;
+                mpf_init(realInterpolate);
+                interpolateSpan(minReal, realSpan, widthProgress, realInterpolate);
+
+                mpf_t imaginaryInterpolate;
+                mpf_init(imaginaryInterpolate);
+                interpolateSpan(minImaginary, imaginarySpan, heightProgress, imaginaryInterpolate);
                 ImaginaryNumber pixel(
-                    interpolateSpan(minReal, realSpan, (double)x / (double)nScreenWidth),
-                    interpolateSpan(minImaginary, imaginarySpan, (double)y / (double)nScreenHeight)
+                    realInterpolate,
+                    imaginaryInterpolate
                 );
                 bool bound = isMandlebrotBound(pixel, resolution);
                 if (bound)
@@ -77,6 +119,11 @@ int main()
                 {
                     screen[y * nScreenWidth + x] = ' ';
                 }
+
+                mpf_clear(widthProgress);
+                mpf_clear(heightProgress);
+                mpf_clear(realInterpolate);
+                mpf_clear(imaginaryInterpolate);
             }
         }
         
@@ -85,75 +132,117 @@ int main()
         refresh();
 
         char input = getch();
-        double movement;
         
         switch(input) { // the real value
             case 'z': // RESOLUTION +
-                resolution *= 2;
-                logger << resolution << endl;
+                resolution += resolutionStep;
                 break;
             case 'x': // RESOLUTION -
-                resolution /= 2;
-                logger << resolution << endl;
+                resolution -= resolutionStep;
                 break;
             case 'w': // UP
-                movement = 0.05 * imaginarySpan;
-                minImaginary -= movement;
-                maxImaginary -= movement;
+                {
+                    mpf_t coefficient;
+                    mpf_init_set_d(coefficient, 0.05);
+                    mpf_mul(movement, coefficient, imaginarySpan);
+                    mpf_sub(minImaginary, minImaginary, movement);
+                    mpf_sub(maxImaginary, maxImaginary, movement);
+                    mpf_clear(coefficient);
+                }
                 break;
             case 's': // DOWN
-                movement = 0.05 * imaginarySpan;
-                minImaginary += movement;
-                maxImaginary += movement;
+                {
+                    mpf_t coefficient;
+                    mpf_init_set_d(coefficient, 0.05);
+                    mpf_mul(movement, coefficient, imaginarySpan);
+                    mpf_add(minImaginary, minImaginary, movement);
+                    mpf_add(maxImaginary, maxImaginary, movement);
+                    mpf_clear(coefficient);
+                }
+
                 break;
             case 'd': // RIGHT
-                movement = 0.05 * realSpan;
-                minReal += movement;
-                maxReal += movement;
+                {
+                    mpf_t coefficient;
+                    mpf_init_set_d(coefficient, 0.05);
+                    mpf_mul(movement, coefficient, realSpan);
+                    mpf_add(minReal, minReal, movement);
+                    mpf_add(maxReal, maxReal, movement);
+                    mpf_clear(coefficient);
+                }
                 break;
             case 'a': // LEFT
-                movement = 0.05 * realSpan;
-                minReal -= movement;
-                maxReal -= movement;
+                {
+                    mpf_t coefficient;
+                    mpf_init_set_d(coefficient, 0.05);
+                    mpf_mul(movement, coefficient, realSpan);
+                    mpf_sub(minReal, minReal, movement);
+                    mpf_sub(maxReal, maxReal, movement);
+                    mpf_clear(coefficient);
+                }
                 break;
             case 'q': // ZOOM+
                 {
-                    // CENTER POINT
-                    double realCenter = minReal + (realSpan / 2.0);
-                    double imaginaryCenter = minImaginary + (imaginarySpan / 2.0);
+                    mpf_t half;
+                    mpf_init_set_d(half, 0.5);
+
+                    mpf_t realCenter;
+                    mpf_init(realCenter);
+                    interpolateSpan(minReal, realSpan, half, realCenter);
+
+                    mpf_t imaginaryCenter;
+                    mpf_init(imaginaryCenter);
+                    interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
+                    
                     Vector2D center(realCenter, imaginaryCenter);
 
                     Vector2D topLeft(minReal, minImaginary);
                     Vector2D bottomRight(maxReal, maxImaginary);
 
-                    Vector2D newTopLeft = topLeft.Subtract(center).Multiply(0.5).Add(center);
-                    Vector2D newBottomRight = bottomRight.Subtract(center).Multiply(0.5).Add(center);
+                    Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(0.5)->Add(center);
+                    Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(0.5)->Add(center);
 
-                    minReal = newTopLeft.X();
-                    minImaginary = newTopLeft.Y();
+                    newTopLeft->X(minReal);
+                    newTopLeft->Y(minImaginary);
 
-                    maxReal = newBottomRight.X();
-                    maxImaginary = newBottomRight.Y();
+                    newBottomRight->X(maxReal);
+                    newBottomRight->Y(maxImaginary);
+
+                    mpf_clear(half);
+                    mpf_clear(realCenter);
+                    mpf_clear(imaginaryCenter);
                 }
                 break;
             case 'e': // ZOOM-
                 {
-                    // CENTER POINT
-                    double realCenter = minReal + (realSpan / 2.0);
-                    double imaginaryCenter = minImaginary + (imaginarySpan / 2.0);
+                    mpf_t half;
+                    mpf_init_set_d(half, 0.5);
+
+                    mpf_t realCenter;
+                    mpf_init(realCenter);
+                    interpolateSpan(minReal, realSpan, half, realCenter);
+
+                    mpf_t imaginaryCenter;
+                    mpf_init(imaginaryCenter);
+                    interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
+                    
                     Vector2D center(realCenter, imaginaryCenter);
 
                     Vector2D topLeft(minReal, minImaginary);
                     Vector2D bottomRight(maxReal, maxImaginary);
 
-                    Vector2D newTopLeft = topLeft.Subtract(center).Multiply(2.0).Add(center);
-                    Vector2D newBottomRight = bottomRight.Subtract(center).Multiply(2.0).Add(center);
+                    Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(2)->Add(center);
+                    Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(2)->Add(center);
 
-                    minReal = newTopLeft.X();
-                    minImaginary = newTopLeft.Y();
+                    newTopLeft->X(minReal);
+                    newTopLeft->Y(minImaginary);
 
-                    maxReal = newBottomRight.X();
-                    maxImaginary = newBottomRight.Y();
+                    newBottomRight->X(maxReal);
+                    newBottomRight->Y(maxImaginary);
+
+                    mpf_clear(half);
+                    mpf_clear(realCenter);
+                    mpf_clear(imaginaryCenter);
                 }
                 break;
         }
@@ -163,11 +252,3 @@ int main()
     endwin();
     return 0;
 }
-
-/*
--2, 1 => -0.5, 0
-
--2  =>  -0.5
-1   =>  0
-
-*/

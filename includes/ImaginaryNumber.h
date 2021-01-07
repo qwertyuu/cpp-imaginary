@@ -1,19 +1,23 @@
 #pragma once
 #include <ostream>
 #include <string>
+#include <gmp.h>
 using namespace std;
 
 class ImaginaryNumber
 {
     public:
         ImaginaryNumber(double real_part, double imaginary_part);
+        ImaginaryNumber(mpf_t &real_part, mpf_t &imaginary_part);
+
+        ~ImaginaryNumber();
 
         double GetRealPart() const;
         double GetImaginaryPart() const;
-        ImaginaryNumber Square() const;
-        ImaginaryNumber Add(ImaginaryNumber i) const;
-        ImaginaryNumber Subtract(ImaginaryNumber i) const;
-        double SquaredAbsolute() const;
+        ImaginaryNumber &Square();
+        ImaginaryNumber &Add(ImaginaryNumber &i);
+        ImaginaryNumber &Subtract(ImaginaryNumber &i);
+        bool SquaredAbsoluteGreaterThan(double v) const;
 
         friend std::ostream &operator<<(std::ostream &strm, const ImaginaryNumber &a)
         {
@@ -27,7 +31,11 @@ class ImaginaryNumber
         }
 
     private:
-        double realPart = 0;
-        double imaginaryPart = 0;
+        mpf_t realPart;
+        mpf_t imaginaryPart;
+        mpf_t realPartSquared;
+        mpf_t imaginaryPartSquared;
+
+        void ComputeSquaredParts();
 };
 
