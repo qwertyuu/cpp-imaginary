@@ -1,1 +1,1 @@
-g++ -std=c++17 -o bin/imaginary Source.cpp includes/*.cpp -lncurses -lgmp
+g++ -std=c++17 -o bin/imaginary Source.cpp includes/*.cpp -lncurses -lgmp -pthread -Ofast

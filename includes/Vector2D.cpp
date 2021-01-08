@@ -10,6 +10,12 @@ Vector2D::Vector2D(mpf_t &X, mpf_t &Y)
     mpf_set(y, Y);
 }
 
+Vector2D::Vector2D()
+{
+    mpf_init(x);
+    mpf_init(y);
+}
+
 Vector2D::~Vector2D()
 {
     mpf_clear(x);

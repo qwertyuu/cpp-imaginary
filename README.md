@@ -7,7 +7,7 @@ This thing runs on linux, and was developed on ubuntu. It is supposed to let you
 
 It was a toy project for me to get my hands around C++ and its tools on linux
 
-Make sure you install ncurses (`sudo apt install ncurses`), GMP (`sudo apt install libgmp-dev`), boost (`sudo apt install libboost-all-dev`) and use a resolution of terminal about 120x40 (or same ratio else it'll be squished)
+Make sure you install ncurses (`sudo apt install ncurses`) and GMP (`sudo apt install libgmp-dev`) and use a resolution of terminal about 120x40 (or same ratio else it'll be squished)
 
 # Installation
 

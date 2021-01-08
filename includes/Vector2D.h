@@ -6,6 +6,7 @@ class Vector2D
 {
     public:
         Vector2D(mpf_t &X, mpf_t &Y);
+        Vector2D();
         ~Vector2D();
 
         Vector2D *Multiply(double scalar);

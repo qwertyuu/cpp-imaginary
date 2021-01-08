@@ -6,6 +6,14 @@
 #include "includes/ImaginaryNumber.h"
 #include "includes/Vector2D.h"
 #include <gmp.h>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include <functional>
+#include <tuple>
+#include <atomic>
 
 using namespace std;
 
@@ -47,49 +55,41 @@ void interpolateSpan(mpf_t &min, mpf_t &span, mpf_t &progress, mpf_t &result)
     mpf_add(result, result, min);
 }
 
-int main()
+std::mutex mtx;
+std::condition_variable cv;
+std::queue<tuple<int, int, int, int>> Queue;
+char *screen;
+mpf_t screenWidth;
+mpf_t screenHeight;
+mpf_t minReal;
+mpf_t maxReal;
+mpf_t minImaginary;
+mpf_t maxImaginary;
+mpf_t realSpan;
+mpf_t imaginarySpan;
+mpf_t movement;
+unsigned int resolution = 128;
+int zoomFactor = 0;
+
+atomic<int> sectionsComputed;
+atomic<int> totalSectionsToCompute;
+
+void computeMandlebrotSection()
 {
-    logger.open ("log.txt");
-    WINDOW *currWin = initscr();
-    getmaxyx(currWin, nScreenHeight, nScreenWidth);
-    mpf_t screenWidth;
-    mpf_init_set_d(screenWidth, nScreenWidth);
-    mpf_t screenHeight;
-    mpf_init_set_d(screenHeight, nScreenHeight);
-
-    mpf_init_set_si(defaultMinReal, -2);
-    mpf_init_set_si(defaultMaxReal, 1);
-
-    mpf_init_set_si(defaultMinImaginary, 1);
-    mpf_init_set_si(defaultMaxImaginary, -1);
-
-    char *screen = new char[nScreenWidth * nScreenHeight];
-    mpf_t minReal;
-    mpf_init_set(minReal, defaultMinReal);
-    mpf_t maxReal;
-    mpf_init_set(maxReal, defaultMaxReal);
-    mpf_t minImaginary;
-    mpf_init_set(minImaginary, defaultMinImaginary);
-    mpf_t maxImaginary;
-    mpf_init_set(maxImaginary, defaultMaxImaginary);
-
-    unsigned int resolution = 128;
-    mpf_t realSpan;
-    mpf_t imaginarySpan;
-    mpf_t movement;
-
-    mpf_init(movement);
-    mpf_init(realSpan);
-    mpf_init(imaginarySpan);
-
-    while (1)
+    while (true)
     {
-        mpf_sub(realSpan, maxReal, minReal);
-        mpf_sub(imaginarySpan, maxImaginary, minImaginary);
-    
-        for (int y = 0; y < nScreenHeight; y++)
+        tuple<int, int, int, int> Job;
         {
-            for (int x = 0; x < nScreenWidth; x++)
+            unique_lock<mutex> lock(mtx);
+            cv.wait(lock, [] { return !Queue.empty(); });
+            Job = Queue.front();
+            Queue.pop();
+        }
+        double mandlebrotIterations = zoomFactor * 45 + 500.0;
+
+        for (int y = get<2>(Job); y < get<3>(Job); y++)
+        {
+            for (int x = get<0>(Job); x < get<1>(Job); x++)
             {
                 mpf_t widthProgress;
                 mpf_init_set_si(widthProgress, x);
@@ -106,19 +106,9 @@ int main()
                 mpf_t imaginaryInterpolate;
                 mpf_init(imaginaryInterpolate);
                 interpolateSpan(minImaginary, imaginarySpan, heightProgress, imaginaryInterpolate);
-                ImaginaryNumber pixel(
-                    realInterpolate,
-                    imaginaryInterpolate
-                );
-                bool bound = isMandlebrotBound(pixel, resolution);
-                if (bound)
-                {
-                    screen[y * nScreenWidth + x] = 'A';
-                }
-                else
-                {
-                    screen[y * nScreenWidth + x] = ' ';
-                }
+                ImaginaryNumber pixel(realInterpolate, imaginaryInterpolate);
+                bool bound = isMandlebrotBound(pixel, mandlebrotIterations);
+                screen[y * nScreenWidth + x] = bound ? 'A' : ' ';
 
                 mpf_clear(widthProgress);
                 mpf_clear(heightProgress);
@@ -126,125 +116,182 @@ int main()
                 mpf_clear(imaginaryInterpolate);
             }
         }
-        
+        sectionsComputed++;
+    }
+}
+
+void addSectionToCompute(int minX, int maxX, int minY, int maxY)
+{
+    {
+        unique_lock<mutex> lock(mtx);
+        Queue.push(make_tuple(minX, maxX, minY, maxY));
+    }
+    cv.notify_one();
+}
+
+int main()
+{
+    int numThreads = thread::hardware_concurrency();
+    vector<thread> threadPool;
+    for (int ii = 0; ii < numThreads; ii++)
+    {
+        threadPool.push_back(thread(computeMandlebrotSection));
+    }
+    logger.open("log.txt");
+    WINDOW *currWin = initscr();
+    getmaxyx(currWin, nScreenHeight, nScreenWidth);
+    mpf_init_set_d(screenWidth, nScreenWidth);
+    mpf_init_set_d(screenHeight, nScreenHeight);
+
+    mpf_init_set_si(defaultMinReal, -2);
+    mpf_init_set_si(defaultMaxReal, 1);
+
+    mpf_init_set_si(defaultMinImaginary, 1);
+    mpf_init_set_si(defaultMaxImaginary, -1);
+
+    screen = new char[nScreenWidth * nScreenHeight];
+    mpf_init_set(minReal, defaultMinReal);
+    mpf_init_set(maxReal, defaultMaxReal);
+    mpf_init_set(minImaginary, defaultMinImaginary);
+    mpf_init_set(maxImaginary, defaultMaxImaginary);
+
+    mpf_init(movement);
+    mpf_init(realSpan);
+    mpf_init(imaginarySpan);
+
+    while (1)
+    {
+        mpf_sub(realSpan, maxReal, minReal);
+        mpf_sub(imaginarySpan, maxImaginary, minImaginary);
+        for (int x = 0; x < nScreenWidth; x++)
+        {
+            addSectionToCompute(x, x + 1, 0, nScreenHeight);
+        }
+        totalSectionsToCompute += nScreenWidth;
+        while (sectionsComputed < totalSectionsToCompute)
+        {
+        }
         clear();
         mvaddstr(0, 0, screen);
         refresh();
 
         char input = getch();
-        
-        switch(input) { // the real value
-            case 'z': // RESOLUTION +
-                resolution += resolutionStep;
-                break;
-            case 'x': // RESOLUTION -
-                resolution -= resolutionStep;
-                break;
-            case 'w': // UP
-                {
-                    mpf_t coefficient;
-                    mpf_init_set_d(coefficient, 0.05);
-                    mpf_mul(movement, coefficient, imaginarySpan);
-                    mpf_sub(minImaginary, minImaginary, movement);
-                    mpf_sub(maxImaginary, maxImaginary, movement);
-                    mpf_clear(coefficient);
-                }
-                break;
-            case 's': // DOWN
-                {
-                    mpf_t coefficient;
-                    mpf_init_set_d(coefficient, 0.05);
-                    mpf_mul(movement, coefficient, imaginarySpan);
-                    mpf_add(minImaginary, minImaginary, movement);
-                    mpf_add(maxImaginary, maxImaginary, movement);
-                    mpf_clear(coefficient);
-                }
 
-                break;
-            case 'd': // RIGHT
-                {
-                    mpf_t coefficient;
-                    mpf_init_set_d(coefficient, 0.05);
-                    mpf_mul(movement, coefficient, realSpan);
-                    mpf_add(minReal, minReal, movement);
-                    mpf_add(maxReal, maxReal, movement);
-                    mpf_clear(coefficient);
-                }
-                break;
-            case 'a': // LEFT
-                {
-                    mpf_t coefficient;
-                    mpf_init_set_d(coefficient, 0.05);
-                    mpf_mul(movement, coefficient, realSpan);
-                    mpf_sub(minReal, minReal, movement);
-                    mpf_sub(maxReal, maxReal, movement);
-                    mpf_clear(coefficient);
-                }
-                break;
-            case 'q': // ZOOM+
-                {
-                    mpf_t half;
-                    mpf_init_set_d(half, 0.5);
+        switch (input)
+        {
+        case 'z': // RESOLUTION +
+            resolution += resolutionStep;
+            break;
+        case 'x': // RESOLUTION -
+            resolution -= resolutionStep;
+            break;
+        case 'w': // UP
+        {
+            mpf_t coefficient;
+            mpf_init_set_d(coefficient, 0.05);
+            mpf_mul(movement, coefficient, imaginarySpan);
+            mpf_sub(minImaginary, minImaginary, movement);
+            mpf_sub(maxImaginary, maxImaginary, movement);
+            mpf_clear(coefficient);
+        }
+        break;
+        case 's': // DOWN
+        {
+            mpf_t coefficient;
+            mpf_init_set_d(coefficient, 0.05);
+            mpf_mul(movement, coefficient, imaginarySpan);
+            mpf_add(minImaginary, minImaginary, movement);
+            mpf_add(maxImaginary, maxImaginary, movement);
+            mpf_clear(coefficient);
+        }
 
-                    mpf_t realCenter;
-                    mpf_init(realCenter);
-                    interpolateSpan(minReal, realSpan, half, realCenter);
+        break;
+        case 'd': // RIGHT
+        {
+            mpf_t coefficient;
+            mpf_init_set_d(coefficient, 0.05);
+            mpf_mul(movement, coefficient, realSpan);
+            mpf_add(minReal, minReal, movement);
+            mpf_add(maxReal, maxReal, movement);
+            mpf_clear(coefficient);
+        }
+        break;
+        case 'a': // LEFT
+        {
+            mpf_t coefficient;
+            mpf_init_set_d(coefficient, 0.05);
+            mpf_mul(movement, coefficient, realSpan);
+            mpf_sub(minReal, minReal, movement);
+            mpf_sub(maxReal, maxReal, movement);
+            mpf_clear(coefficient);
+        }
+        break;
+        case 'q': // ZOOM+
+        {
+            mpf_t half;
+            mpf_init_set_d(half, 0.5);
 
-                    mpf_t imaginaryCenter;
-                    mpf_init(imaginaryCenter);
-                    interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
-                    
-                    Vector2D center(realCenter, imaginaryCenter);
+            mpf_t realCenter;
+            mpf_init(realCenter);
+            interpolateSpan(minReal, realSpan, half, realCenter);
 
-                    Vector2D topLeft(minReal, minImaginary);
-                    Vector2D bottomRight(maxReal, maxImaginary);
+            mpf_t imaginaryCenter;
+            mpf_init(imaginaryCenter);
+            interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
 
-                    Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(0.5)->Add(center);
-                    Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(0.5)->Add(center);
+            Vector2D center(realCenter, imaginaryCenter);
 
-                    newTopLeft->X(minReal);
-                    newTopLeft->Y(minImaginary);
+            Vector2D topLeft(minReal, minImaginary);
+            Vector2D bottomRight(maxReal, maxImaginary);
 
-                    newBottomRight->X(maxReal);
-                    newBottomRight->Y(maxImaginary);
+            Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(0.5)->Add(center);
+            Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(0.5)->Add(center);
 
-                    mpf_clear(half);
-                    mpf_clear(realCenter);
-                    mpf_clear(imaginaryCenter);
-                }
-                break;
-            case 'e': // ZOOM-
-                {
-                    mpf_t half;
-                    mpf_init_set_d(half, 0.5);
+            newTopLeft->X(minReal);
+            newTopLeft->Y(minImaginary);
 
-                    mpf_t realCenter;
-                    mpf_init(realCenter);
-                    interpolateSpan(minReal, realSpan, half, realCenter);
+            newBottomRight->X(maxReal);
+            newBottomRight->Y(maxImaginary);
 
-                    mpf_t imaginaryCenter;
-                    mpf_init(imaginaryCenter);
-                    interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
-                    
-                    Vector2D center(realCenter, imaginaryCenter);
+            mpf_clear(half);
+            mpf_clear(realCenter);
+            mpf_clear(imaginaryCenter);
+            zoomFactor++;
+        }
+        break;
+        case 'e': // ZOOM-
+        {
+            mpf_t half;
+            mpf_init_set_d(half, 0.5);
 
-                    Vector2D topLeft(minReal, minImaginary);
-                    Vector2D bottomRight(maxReal, maxImaginary);
+            mpf_t realCenter;
+            mpf_init(realCenter);
+            interpolateSpan(minReal, realSpan, half, realCenter);
 
-                    Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(2)->Add(center);
-                    Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(2)->Add(center);
+            mpf_t imaginaryCenter;
+            mpf_init(imaginaryCenter);
+            interpolateSpan(minImaginary, imaginarySpan, half, imaginaryCenter);
 
-                    newTopLeft->X(minReal);
-                    newTopLeft->Y(minImaginary);
+            Vector2D center(realCenter, imaginaryCenter);
 
-                    newBottomRight->X(maxReal);
-                    newBottomRight->Y(maxImaginary);
+            Vector2D topLeft(minReal, minImaginary);
+            Vector2D bottomRight(maxReal, maxImaginary);
 
-                    mpf_clear(half);
-                    mpf_clear(realCenter);
-                    mpf_clear(imaginaryCenter);
-                }
-                break;
+            Vector2D *newTopLeft = topLeft.Subtract(center)->Multiply(2)->Add(center);
+            Vector2D *newBottomRight = bottomRight.Subtract(center)->Multiply(2)->Add(center);
+
+            newTopLeft->X(minReal);
+            newTopLeft->Y(minImaginary);
+
+            newBottomRight->X(maxReal);
+            newBottomRight->Y(maxImaginary);
+
+            mpf_clear(half);
+            mpf_clear(realCenter);
+            mpf_clear(imaginaryCenter);
+            zoomFactor--;
+        }
+        break;
         }
         logger.flush();
     }
